@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ระบบบันทึกภาพพิกัดและมิเตอร์อัจฉริยะ</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet Map CSS & JS (ฟรี ไม่มีค่าใช้จ่าย และไม่ต้องใช้ API Key เหมือน Google Maps) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Google Fonts (Prompt) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* ลบปุ่มกดเพิ่ม/ลดตัวเลขเดิมของเบราว์เซอร์ */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 flex flex-col pb-12">
+
+    <!-- ส่วนหัวแอป -->
+    <header class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-md sticky top-0 z-50 px-4 py-3">
+        <div class="max-w-md mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-gauge-high text-2xl text-yellow-300"></i>
+                <h1 class="text-lg font-bold tracking-tight">MeterSmart Saver</h1>
+            </div>
+            <!-- สถานะออนไลน์ / ออฟไลน์ -->
+            <div class="flex items-center space-x-2">
+                <span id="offline-counter" class="hidden bg-orange-500 text-white text-xs font-semibold px-2 py-1 rounded-full animate-pulse">
+                    <i class="fa-solid fa-cloud-arrow-up mr-1"></i> ค้างส่ง <span id="unsynced-count">0</span>
+                </span>
+                <span id="connection-status" class="bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center">
+                    <span class="w-2 h-2 rounded-full bg-white mr-1.5 animate-ping"></span> ออนไลน์
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto w-full px-4 pt-4 flex-grow space-y-4">
+        
+        <!-- ข้อแนะนำเบื้องต้นเมื่อเปิดใช้งานครั้งแรก -->
+        <div id="welcome-tip" class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r-lg text-xs text-blue-800 flex items-start space-x-2">
+            <i class="fa-solid fa-circle-info text-blue-500 mt-0.5"></i>
+            <div>
+                <p class="font-semibold">คำแนะนำก่อนใช้งาน:</p>
+                <p>กรุณากด "อนุญาต" สิทธิ์เข้าใช้งานกล้อง, ไมโครโฟน และพิกัดตำแหน่ง (GPS) เพื่อการทำเว็บแอปได้อย่างเต็มประสิทธิภาพ</p>
+            </div>
+        </div>
+
+        <!-- ส่วนที่ 1: ถ่ายรูปมิเตอร์ -->
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="font-semibold text-slate-700 flex items-center">
+                    <i class="fa-solid fa-camera mr-2 text-blue-600"></i> 1. ถ่ายภาพมิเตอร์
+                </h2>
+                <span class="text-xs text-rose-500 font-medium">* จำเป็น</span>
+            </div>
+
+            <div class="space-y-3">
+                <!-- ช่องอินพุตกล้องถ่ายภาพ -->
+                <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                
+                <!-- หน้าพรีวิวภาพ -->
+                <div id="image-preview-container" class="relative bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg h-52 flex flex-col justify-center items-center cursor-pointer overflow-hidden transition hover:bg-slate-150" onclick="triggerCamera()">
+                    <div id="preview-placeholder" class="text-center p-4">
+                        <i class="fa-solid fa-image text-4xl text-slate-400 mb-2"></i>
+                        <p class="text-sm font-semibold text-slate-600">กดเพื่อเปิดกล้องถ่ายภาพ</p>
+                        <p class="text-xs text-slate-400 mt-1">ภาพจะถูกบันทึกแสตมป์พิกัดและเวลาอัตโนมัติ</p>
+                    </div>
+                    <!-- แท็กรูปภาพที่จะถูกแสตมป์ลายน้ำเสร็จแล้ว -->
+                    <img id="image-preview" class="hidden w-full h-full object-cover">
+                    
+                    <!-- แถบจำลองลายน้ำพรีวิว -->
+                    <div id="preview-watermark" class="hidden absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] p-2 font-mono">
+                        <div>📌 <span id="watermark-gps">--</span></div>
+                        <div>🕒 <span id="watermark-time">--</span></div>
+                    </div>
+                </div>
+
+                <!-- ปลุ่มถ่ายใหม่ -->
+                <button type="button" id="retake-btn" class="hidden w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-lg border border-slate-300 transition" onclick="triggerCamera()">
+                    <i class="fa-solid fa-arrows-rotate mr-1"></i> ถ่ายรูปใหม่
+                </button>
+            </div>
+        </div>
+
+        <!-- ส่วนที่ 2: ดึงพิกัดและแผนที่ปรับแต่งหมุดได้แบบ LINE -->
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="font-semibold text-slate-700 flex items-center">
+                    <i class="fa-solid fa-map-location-dot mr-2 text-blue-600"></i> 2. พิกัดจุดทำงาน (GPS)
+                </h2>
+                <button type="button" onclick="getCurrentLocation()" class="text-xs text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-1 rounded">
+                    <i class="fa-solid fa-location-crosshairs mr-1"></i> ดึงตำแหน่งใหม่
+                </button>
+            </div>
+
+            <!-- ข้อความแสดงพิกัด -->
+            <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs flex justify-between items-center mb-2 font-mono">
+                <div>
+                    <span class="text-slate-500">พิกัดปัจจุบัน:</span> 
+                    <span id="gps-display" class="font-semibold text-slate-700">กำลังดึงพิกัดตำแหน่ง...</span>
+                </div>
+                <span id="gps-accuracy" class="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">ความแม่นยำ: -- เมตร</span>
+            </div>
+
+            <!-- กล่องแผนที่ Leaflet (ปรับหมุดย้ายตำแหน่งได้แบบ LINE) -->
+            <div id="map" class="h-44 w-full rounded-lg border border-slate-200 z-10"></div>
+            <p class="text-[11px] text-slate-400 mt-1.5"><i class="fa-solid fa-circle-question"></i> ท่านสามารถ "ลากเลื่อนหมุดสีแดง" บนแผนที่ หรือคลิกจุดอื่นเพื่อปรับตำแหน่งแก้ไขพิกัดจริงหน้างานได้</p>
+        </div>
+
+        <!-- ส่วนที่ 3: บันทึกเลขมิเตอร์เก่า -->
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-4">
+            <h2 class="font-semibold text-slate-700 flex items-center border-b border-slate-100 pb-2">
+                <i class="fa-solid fa-calculator mr-2 text-slate-500"></i> 3. บันทึกข้อมูลมิเตอร์เก่า
+            </h2>
+
+            <!-- หมายเลขมิเตอร์เก่า -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-600 block">หมายเลขมิเตอร์เก่า (ตัวอักษร/ตัวเลข)</label>
+                <div class="relative">
+                    <input type="text" id="old-meter-no" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition outline-none" placeholder="เช่น 284A-C" onfocus="setActiveInput(this, 'alphanumeric')">
+                    <button type="button" onclick="startSpeechRecognition('old-meter-no')" class="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition" title="พูดป้อนข้อมูล">
+                        <i class="fa-solid fa-microphone text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- หน่วยมิเตอร์เก่า -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-600 block">หน่วยมิเตอร์เก่า (ตัวเลขทศนิยม)</label>
+                <div class="relative">
+                    <input type="text" inputmode="none" id="old-meter-val" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition outline-none font-semibold text-slate-700" placeholder="เช่น 12450.5" onfocus="setActiveInput(this, 'numeric')">
+                    <button type="button" onclick="startSpeechRecognition('old-meter-val')" class="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition" title="พูดป้อนข้อมูล">
+                        <i class="fa-solid fa-microphone text-sm"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ส่วนที่ 4: บันทึกเลขมิเตอร์ใหม่ -->
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-4">
+            <h2 class="font-semibold text-slate-700 flex items-center border-b border-slate-100 pb-2">
+                <i class="fa-solid fa-bolt mr-2 text-blue-600"></i> 4. บันทึกข้อมูลมิเตอร์ใหม่
+            </h2>
+
+            <!-- หมายเลขมิเตอร์ใหม่ -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-600 block">หมายเลขมิเตอร์ใหม่ (ตัวอักษร/ตัวเลข) <span class="text-rose-500">*</span></label>
+                <div class="relative">
+                    <input type="text" id="new-meter-no" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition outline-none" placeholder="เช่น A350B" onfocus="setActiveInput(this, 'alphanumeric')">
+                    <button type="button" onclick="startSpeechRecognition('new-meter-no')" class="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition" title="พูดป้อนข้อมูล">
+                        <i class="fa-solid fa-microphone text-sm"></i>
+                    </button>
+                </div>
+                <!-- ปุ่มลัดกรอกตัวอักษรด่วน A-E -->
+                <div class="flex items-center space-x-1.5 pt-1">
+                    <span class="text-[10px] text-slate-400 mr-1">ปุ่มกดด่วน:</span>
+                    <button type="button" onclick="appendCharToActive('A')" class="bg-slate-100 hover:bg-blue-100 hover:text-blue-600 px-2.5 py-1 text-xs font-bold rounded border border-slate-200 transition">A</button>
+                    <button type="button" onclick="appendCharToActive('B')" class="bg-slate-100 hover:bg-blue-100 hover:text-blue-600 px-2.5 py-1 text-xs font-bold rounded border border-slate-200 transition">B</button>
+                    <button type="button" onclick="appendCharToActive('C')" class="bg-slate-100 hover:bg-blue-100 hover:text-blue-600 px-2.5 py-1 text-xs font-bold rounded border border-slate-200 transition">C</button>
+                    <button type="button" onclick="appendCharToActive('D')" class="bg-slate-100 hover:bg-blue-100 hover:text-blue-600 px-2.5 py-1 text-xs font-bold rounded border border-slate-200 transition">D</button>
+                    <button type="button" onclick="appendCharToActive('E')" class="bg-slate-100 hover:bg-blue-100 hover:text-blue-600 px-2.5 py-1 text-xs font-bold rounded border border-slate-200 transition">E</button>
+                </div>
+            </div>
+
+            <!-- หน่วยมิเตอร์ใหม่ -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-600 block">หน่วยมิเตอร์ใหม่ (ตัวเลขทศนิยม) <span class="text-rose-500">*</span></label>
+                <div class="relative">
+                    <input type="text" inputmode="none" id="new-meter-val" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition outline-none font-semibold text-slate-700" placeholder="0.00" onfocus="setActiveInput(this, 'numeric')">
+                    <button type="button" onclick="startSpeechRecognition('new-meter-val')" class="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition" title="พูดป้อนข้อมูล">
+                        <i class="fa-solid fa-microphone text-sm"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ส่วนของแผงแป้นพิมพ์ตัวเลขพิเศษ (Custom Keypad) -->
+        <div id="custom-keypad-panel" class="hidden bg-slate-200 p-3 rounded-2xl shadow-inner border border-slate-300 animate-slide-up">
+            <div class="flex justify-between items-center mb-2 px-1 text-xs text-slate-500">
+                <span><i class="fa-solid fa-keyboard mr-1"></i> แป้นพิมพ์ตัวเลขสำหรับกรอกหน่วย</span>
+                <button type="button" onclick="closeKeypad()" class="text-blue-600 font-bold hover:underline">เสร็จสิ้น</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+                <button type="button" onclick="keypadPress('1')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">1</button>
+                <button type="button" onclick="keypadPress('2')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">2</button>
+                <button type="button" onclick="keypadPress('3')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">3</button>
+                
+                <button type="button" onclick="keypadPress('4')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">4</button>
+                <button type="button" onclick="keypadPress('5')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">5</button>
+                <button type="button" onclick="keypadPress('6')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">6</button>
+                
+                <button type="button" onclick="keypadPress('7')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">7</button>
+                <button type="button" onclick="keypadPress('8')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">8</button>
+                <button type="button" onclick="keypadPress('9')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">9</button>
+                
+                <button type="button" onclick="keypadPress('.')" class="bg-white active:bg-blue-100 py-3 rounded-lg font-bold text-lg shadow-sm text-blue-600">.</button>
+                <button type="button" onclick="keypadPress('0')" class="bg-white active:bg-slate-100 py-3 rounded-lg font-bold text-lg shadow-sm">0</button>
+                <button type="button" onclick="keypadPress('backspace')" class="bg-rose-50 active:bg-rose-100 text-rose-600 py-3 rounded-lg font-bold text-lg shadow-sm flex items-center justify-center">
+                    <i class="fa-solid fa-delete-left"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ข้อมูลค้างส่งเวลา Offline -->
+        <div id="sync-warning" class="hidden bg-amber-50 border border-amber-300 p-3 rounded-xl flex items-center justify-between">
+            <div class="flex items-center space-x-2 text-xs text-amber-800">
+                <i class="fa-solid fa-cloud-arrow-up text-lg text-amber-500 animate-bounce"></i>
+                <div>
+                    <p class="font-bold">มีข้อมูลค้างส่งในเครื่อง <span class="unsynced-text-count">0</span> รายการ</p>
+                    <p class="text-[10px]">ระบบบันทึกภาพและพิกัดลงมือถือไว้แล้ว กดส่งข้อมูลเมื่อมีเน็ต</p>
+                </div>
+            </div>
+            <button type="button" onclick="syncOfflineData()" class="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm transition">
+                <i class="fa-solid fa-sync mr-1"></i> ซิงค์เลย
+            </button>
+        </div>
+
+        <!-- ปุ่มกดบันทึกและส่งข้อมูลใหญ่ -->
+        <button type="button" id="submit-btn" onclick="handleSubmit()" class="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-lg rounded-xl shadow-lg shadow-blue-500/20 active:scale-95 transition flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            <span id="submit-btn-text">ส่งข้อมูลเข้า Google Sheets</span>
+        </button>
+
+        <!-- หมายเหตุกำกับข้อจำกัดเพื่อความโปร่งใส -->
+        <div class="bg-slate-100 p-3 rounded-lg border border-slate-200 text-[11px] text-slate-500 space-y-1">
+            <p class="font-semibold text-slate-600"><i class="fa-solid fa-circle-exclamation text-amber-500"></i> ข้อจำกัดทางเทคนิคและคำแนะนำ:</p>
+            <ul class="list-disc pl-4 space-y-1">
+                <li><strong>ระบบแปลงเสียง (Speech to Text):</strong> ทำงานได้แม่นยำดีเยี่ยมใน Google Chrome และ Safari หากเสียงแวดล้อมดังเกินไป ระบบแปลงเสียงอาจเพี้ยน ให้แก้ไขพิกัดและป้อนตัวเลขด้วยปุ่มกดบนหน้าจอทดแทนได้</li>
+                <li><strong>การใช้พิกัดแผนที่:</strong> ตัวหมุดย้ายปรับแบบ LINE จะใช้ Leaflet Map ซึ่งฟรีและเร็ว หากต้องการอัปเกรดเป็น Google Maps API ในภายหลังจะเริ่มมีค่าใช้จ่ายเมื่อเกินโควตาฟรี</li>
+                <li><strong>การตั้งค่า Google Apps Script:</strong> เพื่อทำการรับข้อมูลบันทึกรูปภาพไปที่ Google Drive และข้อความไปที่ Google Sheets อย่างเต็มระบบ คุณต้องตั้งค่าตัวรับ API หลังบ้านก่อน (คู่มืออยู่ในโค้ดและส่วนท้ายคำอธิบาย)</li>
+            </ul>
+        </div>
+
+    </main>
+
+    <!-- Modal ตัวบ่งชี้การบันทึกภาพ / การส่งข้อมูลแบบเต็มจอ -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex flex-col justify-center items-center text-white">
+        <div class="bg-slate-800 p-6 rounded-2xl flex flex-col items-center max-w-xs text-center shadow-xl border border-slate-700">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p id="loading-text" class="text-sm font-semibold">กำลังนำภาพมาแสตมป์ลายน้ำพิกัด...</p>
+        </div>
+    </div>
+
+    <!-- Modal บ่งชี้การสั่งพิมพ์ด้วยเสียง -->
+    <div id="voice-overlay" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex flex-col justify-center items-center text-white">
+        <div class="bg-slate-800 p-6 rounded-2xl flex flex-col items-center max-w-xs text-center border border-slate-700 animate-scale-up">
+            <div class="relative w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <div class="absolute inset-0 bg-red-500/30 rounded-full animate-ping"></div>
+                <i class="fa-solid fa-microphone text-2xl text-red-500 z-10"></i>
+            </div>
+            <p class="font-bold mb-1">กำลังรับฟังเสียงพูด...</p>
+            <p class="text-xs text-slate-400 mb-3" id="voice-target-desc">กรุณาพูดตัวเลข/ตัวอักษรภาษาไทย</p>
+            <div class="text-sm italic font-mono bg-slate-900 p-2.5 rounded border border-slate-700 w-full min-h-[40px] text-green-400" id="voice-interim-result">
+                --- นิ่งเพื่อฟังคำ ---
+            </div>
+            <button type="button" onclick="stopSpeechRecognitionDirectly()" class="mt-4 px-4 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs font-semibold rounded-lg transition">
+                ยกเลิก
+            </button>
+        </div>
+    </div>
+
+    <!-- โมดอลแจ้งผลบันทึกสำเร็จ -->
+    <div id="success-modal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-2xl max-w-xs w-full text-center shadow-2xl animate-scale-up">
+            <div class="w-14 h-14 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                <i class="fa-solid fa-circle-check"></i>
+            </div>
+            <h3 id="success-title" class="font-bold text-lg text-slate-800 mb-1">บันทึกข้อมูลเรียบร้อย!</h3>
+            <p id="success-body" class="text-xs text-slate-500 mb-4">ข้อมูลพิกัดและพารามิเตอร์มิเตอร์ถูกบันทึกสำเร็จแบบออนไลน์แล้ว</p>
+            <button type="button" onclick="closeSuccessModal()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition">
+                ตกลง
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- ส่วนกำหนดค่า API สำหรับเชื่อมต่อ Google Apps Script ---
+        // เมื่อนำโค้ด Google Apps Script ไป Deploy เป็น Web App แล้ว นำลิงก์ URL มาใส่ตรงนี้เพื่อใช้งานส่งจริงได้ทันที
+        const GOOGLE_SCRIPT_URL = "[https://script.google.com/macros/s/AKfycbwdlHhen-mZt1o9ZG0zonPa8Jg3RTHyydm9zqtyUhKht1TipF40f5c9PjZe3pstCgtNIg/exec](https://script.google.com/macros/s/AKfycbwdlHhen-mZt1o9ZG0zonPa8Jg3RTHyydm9zqtyUhKht1TipF40f5c9PjZe3pstCgtNIg/exec)"; 
+
+        // --- ตัวแปรจัดการสเตทของแอป ---
+        let currentLatitude = 13.7563; // พิกัดเริ่มต้นกรุงเทพฯ ในกรณีดึงพิกัดไม่ได้ทันที
+        let currentLongitude = 100.5018;
+        let locationAccuracy = 0;
+        let map = null;
+        let marker = null;
+        let selectedImageDataUrl = null; // เก็บภาพที่มีแสตมป์ลายน้ำแล้วในรูปแบบ Base64
+        let db = null; // คลัง IndexedDB สำหรับการทำ Offline Mode
+        let activeInput = null; // ตรวจจับอินพุตที่กำลังเลือกใช้งานอยู่
+        let activeInputType = null; // 'numeric' หรือ 'alphanumeric'
+        let speechRecognizer = null;
+
+        // --- 1. การจัดการระบบ Offline Storage (IndexedDB) บนมือถือ ---
+        const DB_NAME = "MeterOfflineDB";
+        const STORE_NAME = "records";
+
+        function initIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = function(e) {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+                    }
+                };
+                request.onsuccess = function(e) {
+                    db = e.target.result;
+                    updateOfflineCounter();
+                    resolve();
+                };
+                request.onerror = function() {
+                    console.error("IndexedDB initialization failed.");
+                    reject();
+                };
+            });
+        }
+
+        // เซฟข้อมูลลงเครื่องชั่วคราวแบบออฟไลน์
+        function saveRecordOffline(record) {
+            return new Promise((resolve, reject) => {
+                if (!db) return reject();
+                const transaction = db.transaction([STORE_NAME], "readwrite");
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.add(record);
+                request.onsuccess = () => {
+                    updateOfflineCounter();
+                    resolve();
+                };
+                request.onerror = () => reject();
+            });
+        }
+
+        // ดึงรายการข้อมูลออฟไลน์ทั้งหมดในเครื่อง
+        function getOfflineRecords() {
+            return new Promise((resolve, reject) => {
+                if (!db) return resolve([]);
+                const transaction = db.transaction([STORE_NAME], "readonly");
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.getAll();
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = () => reject();
+            });
+        }
+
+        // ลบข้อมูลเมื่อซิงค์สำเร็จแล้ว
+        function clearOfflineRecord(id) {
+            return new Promise((resolve, reject) => {
+                if (!db) return reject();
+                const transaction = db.transaction([STORE_NAME], "readwrite");
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.delete(id);
+                request.onsuccess = () => {
+                    updateOfflineCounter();
+                    resolve();
+                };
+                request.onerror = () => reject();
+            });
+        }
+
+        // อัปเดตตัวเลขแสดงรายการค้างส่งบนหน้าจอ
+        async function updateOfflineCounter() {
+            try {
+                const records = await getOfflineRecords();
+                const count = records.length;
+                const counterBadge = document.getElementById("offline-counter");
+                const unsyncedSpan = document.getElementById("unsynced-count");
+                const warningDiv = document.getElementById("sync-warning");
+                const warningSpan = document.querySelector(".unsynced-text-count");
+
+                if (count > 0) {
+                    counterBadge.classList.remove("hidden");
+                    unsyncedSpan.textContent = count;
+                    if (warningDiv) {
+                        warningDiv.classList.remove("hidden");
+                        warningSpan.textContent = count;
+                    }
+                } else {
+                    counterBadge.classList.add("hidden");
+                    if (warningDiv) warningDiv.classList.add("hidden");
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // --- 2. การจัดการ แผนที่และการดึงพิกัด (Leaflet Map) ---
+        function initMap() {
+            // สร้างแผนที่ Leaflet และกำหนดมุมมองเริ่มต้น
+            map = L.map('map').setView([currentLatitude, currentLongitude], 15);
+            
+            // ดึงข้อมูลแผนที่ฟรีจาก OpenStreetMap
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // สร้างหมุดสีแดงที่สามารถขยับลากเลื่อนได้แบบแชร์พิกัดใน LINE
+            marker = L.marker([currentLatitude, currentLongitude], {
+                draggable: true
+            }).addTo(map);
+
+            // เมื่อสิ้นสุดการลากหมุด ให้เซ็ตพิกัดใหม่
+            marker.on('dragend', function (event) {
+                const position = marker.getLatLng();
+                updateCoordinates(position.lat, position.lng, null);
+            });
+
+            // เมื่อคลิกพิกัดใดๆ บนหน้าแผนที่ ให้เลื่อนหมุดไปตรงจุดที่คลิกทันที
+            map.on('click', function(e) {
+                marker.setLatLng(e.latlng);
+                updateCoordinates(e.latlng.lat, e.latlng.lng, null);
+            });
+        }
+
+        // ฟังก์ชันดึงค่าพิกัดปัจจุบันจาก GPS ของมือถือ
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const accuracy = Math.round(position.coords.accuracy);
+                        
+                        updateCoordinates(lat, lon, accuracy);
+                        
+                        // เลื่อนแผนที่ไปที่ตำแหน่งใหม่
+                        if (map) {
+                            map.setView([lat, lon], 17);
+                            marker.setLatLng([lat, lon]);
+                        }
+                    },
+                    (error) => {
+                        document.getElementById("gps-display").textContent = "ไม่สามารถเข้าถึง GPS ได้ (ใช้พิกัดปักหมุดปัจจุบัน)";
+                        console.warn("GPS Error: " + error.message);
+                    },
+                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+                );
+            } else {
+                document.getElementById("gps-display").textContent = "อุปกรณ์ของท่านไม่รองรับการดึงพิกัด GPS";
+            }
+        }
+
+        function updateCoordinates(lat, lon, accuracy) {
+            currentLatitude = lat;
+            currentLongitude = lon;
+            if (accuracy !== null) {
+                locationAccuracy = accuracy;
+                document.getElementById("gps-accuracy").textContent = `ความแม่นยำ: ${accuracy} เมตร`;
+            } else {
+                document.getElementById("gps-accuracy").textContent = `ปรับหมุดแมนนวล`;
+            }
+            document.getElementById("gps-display").textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+            
+            // อัปเดตข้อมูลบนรูปภาพพรีวิวด้วยถ้ามีการถ่ายไว้แล้ว
+            document.getElementById("watermark-gps").textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        }
+
+
+        // --- 3. การจัดการระบบแสตมป์ภาพ (Image Watermark) ---
+        function triggerCamera() {
+            document.getElementById("camera-input").click();
+        }
+
+        document.getElementById("camera-input").addEventListener("change", function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            showLoading("กำลังโหลดภาพและจัดทำสแตมป์พิกัด...");
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    // ประมวลผลสร้างลายน้ำแสตมป์ลงบนรูปภาพ
+                    stampWatermarkOnImage(img);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function stampWatermarkOnImage(img) {
+            // สร้าง Canvas ชั่วคราวสำหรับการวาดเขียน
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+
+            // ควบคุมขนาดสูงสุดของรูปภาพไม่ให้ใหญ่จนเกินความจำเป็น (ป้องกันคอขวดเวลาเน็ตช้า)
+            const MAX_WIDTH = 1000;
+            const scaleFactor = MAX_WIDTH / img.width;
+            
+            if (img.width > MAX_WIDTH) {
+                canvas.width = MAX_WIDTH;
+                canvas.height = img.height * scaleFactor;
+            } else {
+                canvas.width = img.width;
+                canvas.height = img.height;
+            }
+
+            // วาดรูปภาพลงใน Canvas
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            // ตั้งค่าดีไซน์ลายน้ำสำหรับแสตมป์
+            const timeString = new Date().toLocaleString('th-TH', { hour12: false });
+            const gpsString = `พิกัดทำงาน: ${currentLatitude.toFixed(6)}, ${currentLongitude.toFixed(6)}`;
+            const watermarkText = `📌 ${gpsString} | 🕒 วันเวลา: ${timeString}`;
+
+            // คำนวณขนาดตัวหนังสือสัมพันธ์กับขนาดความกว้างภาพ
+            const fontSize = Math.max(12, Math.floor(canvas.width / 35));
+            ctx.font = `bold ${fontSize}px sans-serif`;
+
+            // วาดแถบพื้นหลังสีดำโปร่งแสงด้านล่างรูปภาพ
+            const barHeight = fontSize * 1.8;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+            ctx.fillRect(0, canvas.height - barHeight, canvas.width, barHeight);
+
+            // เขียนข้อความลายน้ำสีขาว/ส้มทองเด่นชัดทับลงบนรูปภาพ
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(watermarkText, 15, canvas.height - (barHeight / 2) + (fontSize / 3));
+
+            // แปลง canvas ที่แสตมป์แล้วกลับเป็นไฟล์รูปภาพแบบ Data URL (JPEG คุณภาพ 0.85)
+            selectedImageDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+
+            // แสดงหน้าพรีวิวให้ผู้ใช้เห็นความถูกต้อง
+            document.getElementById("preview-placeholder").classList.add("hidden");
+            const previewImg = document.getElementById("image-preview");
+            previewImg.src = selectedImageDataUrl;
+            previewImg.classList.remove("hidden");
+            document.getElementById("preview-watermark").classList.remove("hidden");
+            document.getElementById("watermark-gps").textContent = `${currentLatitude.toFixed(6)}, ${currentLongitude.toFixed(6)}`;
+            document.getElementById("watermark-time").textContent = timeString;
+            document.getElementById("retake-btn").classList.remove("hidden");
+
+            hideLoading();
+        }
+
+
+        // --- 4. แป้นพิมพ์ตัวเลขพิเศษ (Custom Keypad) และแป้นลัด ---
+        function setActiveInput(element, type) {
+            activeInput = element;
+            activeInputType = type;
+
+            const keypadPanel = document.getElementById("custom-keypad-panel");
+            if (type === 'numeric') {
+                // บังคับแสดงแป้นพิมพ์พิเศษเครื่องคิดเลขสำหรับกรอกหน่วยทศนิยม
+                keypadPanel.classList.remove("hidden");
+                // เพื่อความลื่นไหลในการกดบนมือถือ ปิดคีย์บอร์ดมาตรฐานเครื่องด้วยการใช้ readOnly ชั่วคราว
+                element.readOnly = true;
+                // สไลด์หน้าจอลงมาให้มองเห็นแป้นพิมชัดเจน
+                setTimeout(() => {
+                    keypadPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 100);
+            } else {
+                // ถ้าเป็นกรอกหมายเลขมิเตอร์ ให้ใช้คีย์บอร์ดมือถือปกติและซ่อนแป้นตัวเลข
+                keypadPanel.classList.add("hidden");
+                element.readOnly = false;
+            }
+        }
+
+        function keypadPress(key) {
+            if (!activeInput) return;
+            let currentVal = activeInput.value;
+
+            if (key === 'backspace') {
+                activeInput.value = currentVal.slice(0, -1);
+            } else if (key === '.') {
+                // ป้องกันการเบิ้ลจุดทศนิยม
+                if (!currentVal.includes('.')) {
+                    // หากยังไม่มีค่า ให้เปลี่ยนเป็น 0.
+                    activeInput.value = currentVal === "" ? "0." : currentVal + ".";
+                }
+            } else {
+                // จำกัดทศนิยมไม่เกิน 2 ตำแหน่งตามดีไซน์สเปก
+                if (currentVal.includes('.')) {
+                    const decimalPart = currentVal.split('.')[1];
+                    if (decimalPart && decimalPart.length >= 2) {
+                        return; // เกิน 2 ตำแหน่ง ไม่ให้พิมพ์เพิ่ม
+                    }
+                }
+                activeInput.value = currentVal + key;
+            }
+        }
+
+        function appendCharToActive(char) {
+            // ฟังก์ชันสำหรับปุ่มลัด A-E
+            const targetInput = document.getElementById("new-meter-no");
+            targetInput.focus();
+            targetInput.value = targetInput.value + char;
+        }
+
+        function closeKeypad() {
+            document.getElementById("custom-keypad-panel").classList.add("hidden");
+            if (activeInput) activeInput.readOnly = false;
+        }
+
+
+        // --- 5. ระบบการแปลงเสียงเป็นตัวเลข/ตัวหนังสือภาษาไทย (Speech-to-Text) ---
+        function startSpeechRecognition(targetInputId) {
+            const targetInput = document.getElementById(targetInputId);
+            
+            // ตรวจสอบความเข้ากันได้ของระบบเบราว์เซอร์
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("อุปกรณ์หรือเบราว์เซอร์ของท่านไม่รองรับการพิมพ์ด้วยเสียง (ระบบแนะนำให้เปิดแอปนี้ด้วย Google Chrome บนมือถือ)");
+                return;
+            }
+
+            speechRecognizer = new SpeechRecognition();
+            speechRecognizer.lang = 'th-TH'; // กำหนดให้ฟังและตีความหมายเป็นภาษาไทย
+            speechRecognizer.interimResults = true; // แสดงผลลัพธ์ระหว่างพูดทันทีเพื่อความรวดเร็ว
+            speechRecognizer.maxAlternatives = 1;
+
+            const voiceOverlay = document.getElementById("voice-overlay");
+            const voiceResult = document.getElementById("voice-interim-result");
+            const targetDesc = document.getElementById("voice-target-desc");
+
+            // ตั้งคำแนะนำแก่ผู้ใช้หน้างาน
+            if (targetInputId.includes('val')) {
+                targetDesc.textContent = "กรุณาพูดหน่วยมิเตอร์เป็นตัวเลข เช่น 'สี่ ร้อย ห้า สิบ จุด ห้า'";
+            } else {
+                targetDesc.textContent = "กรุณาพูดรหัส หรือกดพิมพ์แบบผสมตัวอักษรภาษาไทย";
+            }
+
+            voiceResult.textContent = "พร้อมรับฟัง... กรุณาพูดได้เลย";
+            voiceOverlay.classList.remove("hidden");
+
+            speechRecognizer.onresult = function(event) {
+                const resultText = event.results[0][0].transcript;
+                voiceResult.textContent = resultText;
+            };
+
+            speechRecognizer.onerror = function(event) {
+                console.error("Speech Recognition Error: ", event.error);
+                voiceResult.textContent = `เกิดข้อผิดพลาด: ${event.error}`;
+            };
+
+            speechRecognizer.onend = function() {
+                const finalSpeechText = voiceResult.textContent;
+                
+                if (finalSpeechText && finalSpeechText !== "พร้อมรับฟัง... กรุณาพูดได้เลย" && !finalSpeechText.startsWith("เกิดข้อผิดพลาด")) {
+                    // ประมวลผลปรับแต่งข้อความพูดให้เป็นตัวเลขที่ถูกต้องตามหลักเกณฑ์
+                    const processedValue = parseSpeechToOutput(finalSpeechText, targetInputId.includes('val'));
+                    targetInput.value = processedValue;
+                    
+                    // หากกรอกหน่วย ให้บังคับอัปเดตแป้นตัวเลขด้วย
+                    if (targetInputId.includes('val') && activeInput === targetInput) {
+                        targetInput.focus();
+                    }
+                }
+                
+                setTimeout(() => {
+                    voiceOverlay.classList.add("hidden");
+                }, 800);
+            };
+
+            speechRecognizer.start();
+        }
+
+        function stopSpeechRecognitionDirectly() {
+            if (speechRecognizer) {
+                speechRecognizer.stop();
+            }
+            document.getElementById("voice-overlay").classList.add("hidden");
+        }
+
+        // ฟังก์ชันสำคัญแปลงคำภาษาไทยเป็นตัวเลขและฟอร์แมตที่ใช้งานได้จริง
+        function parseSpeechToOutput(text, isNumericField) {
+            if (!text) return "";
+            
+            let result = text.trim();
+
+            // ลบคำแปลกปลอมหรือลดความสับสนในการออกเสียง
+            result = result.replace(/จุด/g, ".");
+            result = result.replace(/ /g, ""); // ลบช่องว่างออกเพื่อให้เป็นข้อความต่อเนื่อง
+
+            // แปลงคำพูดยอดฮิตให้เป็นตัวเลข
+            const ThaiNumbersMap = {
+                "ศูนย์": "0", "หนึ่ง": "1", "สอง": "2", "สาม": "3", "สี่": "4",
+                "ห้า": "5", "หก": "6", "เจ็ด": "7", "แปด": "8", "เก้า": "9",
+                "เอ": "A", "บี": "B", "ซี": "C", "ดี": "D", "อี": "E",
+                "ดับเบิ้ลยู": "W", "โอ": "O"
+            };
+
+            for (const [thaiWord, val] of Object.entries(ThaiNumbersMap)) {
+                const regex = new RegExp(thaiWord, "gi");
+                result = result.replace(regex, val);
+            }
+
+            if (isNumericField) {
+                // หากเป็นคอลัมน์ตัวเลขหน่วยมิเตอร์ ให้สกัดล้างตัวหนังสืออื่นๆ ทิ้งหมด เหลือเฉพาะตัวเลขและจุดทศนิยม
+                result = result.replace(/[^0-9.]/g, "");
+                // ตรวจสอบความถูกต้องของทศนิยม
+                const dotParts = result.split('.');
+                if (dotParts.length > 2) {
+                    result = `${dotParts[0]}.${dotParts[1]}`; // บังคับมีจุดเดียว
+                }
+                if (dotParts[1] && dotParts[1].length > 2) {
+                    result = parseFloat(result).toFixed(2); // ปัดเศษลงที่ทศนิยม 2 ตำแหน่ง
+                }
+            }
+
+            return result;
+        }
+
+
+        // --- 6. การส่งข้อมูล บันทึกเข้าระบบ และ ฟังก์ชัน Offline Sync ---
+        async function handleSubmit() {
+            const oldMeterNo = document.getElementById("old-meter-no").value;
+            const oldMeterVal = document.getElementById("old-meter-val").value;
+            const newMeterNo = document.getElementById("new-meter-no").value;
+            const newMeterVal = document.getElementById("new-meter-val").value;
+
+            // ตรวจสอบความครบถ้วนของข้อมูลที่จำเป็น
+            if (!selectedImageDataUrl) {
+                alert("กรุณาถ่ายภาพมิเตอร์ก่อนทำการส่งข้อมูลเพื่อแสตมป์พิกัด");
+                return;
+            }
+            if (!newMeterNo || !newMeterVal) {
+                alert("กรุณากรอก 'หมายเลขมิเตอร์ใหม่' และ 'หน่วยมิเตอร์ใหม่' ให้ครบถ้วน");
+                return;
+            }
+
+            // จัดทำก้อนออบเจ็กต์ข้อมูล
+            const timestamp = new Date().toLocaleString('th-TH', { hour12: false });
+            const recordData = {
+                timestamp: timestamp,
+                lat: currentLatitude,
+                lon: currentLongitude,
+                old_meter_no: oldMeterNo,
+                old_meter_val: oldMeterVal,
+                new_meter_no: newMeterNo,
+                new_meter_val: newMeterVal,
+                image: selectedImageDataUrl // รูปที่มีลายน้ำแบบ Base64
+            };
+
+            showLoading("กำลังส่งข้อมูล...");
+
+            // ตรวจดูเครือข่ายสัญญาณเน็ต
+            if (navigator.onLine) {
+                try {
+                    const success = await sendToGoogleAppsScript(recordData);
+                    if (success) {
+                        showSuccessModal("ส่งข้อมูลเรียบร้อย!", "ข้อมูลและรูปภาพที่แสตมป์พิกัดถูกบันทึกขึ้นระบบ Google Sheets ออนไลน์สำเร็จแล้ว");
+                        resetForm();
+                    } else {
+                        // หาก API มีปัญหาหรือปิดใช้งาน ให้เซฟเป็นออฟไลน์ไว้ก่อนเพื่อป้องกันข้อมูลสูญหาย
+                        throw new Error("API Connection failed");
+                    }
+                } catch (e) {
+                    console.warn("ส่งไม่สำเร็จ กำลังสลับไปเซฟในเครื่อง (ออฟไลน์):", e);
+                    await saveRecordOffline(recordData);
+                    showSuccessModal("บันทึกในเครื่องเรียบร้อย!", "เนื่องจากสัญญาณไม่เสถียร ระบบจึงเซฟข้อมูลเก็บไว้ในมือถือของคุณโดยปลอดภัยก่อน เมื่อเข้าจุดสัญญาณดีกรุณาคลิกปุ่มซิงค์");
+                    resetForm();
+                }
+            } else {
+                // จุดออฟไลน์โดยสิ้นเชิง
+                await saveRecordOffline(recordData);
+                showSuccessModal("บันทึกข้อมูลออฟไลน์เรียบร้อย!", "บันทึกในอุปกรณ์สำเร็จแล้ว (รอซิงค์พาสเวิร์ดเมื่อเชื่อมต่อเน็ต)");
+                resetForm();
+            }
+            hideLoading();
+        }
+
+        // ฟังก์ชันเรียก API ส่งไปยัง Google Apps Script
+        async function sendToGoogleAppsScript(data) {
+            if (!GOOGLE_SCRIPT_URL) {
+                // หากยังไม่ได้ตั้ง URL ปลายทางหลังบ้าน ให้แจ้งใน Console และอนุญาตให้จำลองว่าสำเร็จเพื่อให้ทดสอบหน้างานได้
+                console.warn("ไม่ได้ตั้งค่า GOOGLE_SCRIPT_URL (ระบบทำงานแบบจำลองการส่งเข้า Sheets)");
+                return new Promise(resolve => setTimeout(() => resolve(true), 1500));
+            }
+
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL, {
+                    method: "POST",
+                    mode: "no-cors", // ใช้ no-cors เนื่องจากเป็นจุดสิ้นสุดของ Apps Script Web App
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(data)
+                });
+                return true; // no-cors จะไม่คืนค่าผลลัพธ์โดยตรง แต่ถือว่าข้อมูลถูกส่งออกไปแล้ว
+            } catch (error) {
+                console.error("Error sending to Apps Script:", error);
+                return false;
+            }
+        }
+
+        // ระบบไล่ซิงค์ข้อมูลทั้งหมดที่ค้างอยู่ใน IndexedDB เมื่อกลับมาจับเน็ตได้
+        async function syncOfflineData() {
+            if (!navigator.onLine) {
+                alert("ขณะนี้ท่านยังคงออฟไลน์อยู่ กรุณาเชื่อมต่ออินเทอร์เน็ตก่อนทำการซิงค์");
+                return;
+            }
+
+            showLoading("กำลังทยอยซิงค์ข้อมูลค้างส่งขึ้นระบบ...");
+            try {
+                const offlineRecords = await getOfflineRecords();
+                let successCount = 0;
+
+                for (const record of offlineRecords) {
+                    const recordId = record.id;
+                    delete record.id; // นำคีย์ไอดีของ IndexedDB ออกก่อนส่งเข้า Google Sheet
+
+                    const isSuccess = await sendToGoogleAppsScript(record);
+                    if (isSuccess) {
+                        await clearOfflineRecord(recordId);
+                        successCount++;
+                    }
+                }
+
+                alert(`ซิงค์ข้อมูลสำเร็จเพิ่มเข้าไปยัง Google Sheets แล้วจำนวน ${successCount} รายการ!`);
+                updateOfflineCounter();
+            } catch (e) {
+                console.error("Sync failed:", e);
+                alert("การซิงค์ล้มเหลวชั่วคราวกรุณาลองใหม่อีกครั้ง");
+            }
+            hideLoading();
+        }
+
+
+        // --- 7. ตัวช่วยเสริมความสะดวกของหน้าจอ (UI Helpers) ---
+        function showLoading(msg) {
+            document.getElementById("loading-text").textContent = msg;
+            document.getElementById("loading-overlay").classList.remove("hidden");
+        }
+
+        function hideLoading() {
+            document.getElementById("loading-overlay").classList.add("hidden");
+        }
+
+        function showSuccessModal(title, message) {
+            document.getElementById("success-title").textContent = title;
+            document.getElementById("success-body").textContent = message;
+            document.getElementById("success-modal").classList.remove("hidden");
+        }
+
+        function closeSuccessModal() {
+            document.getElementById("success-modal").classList.add("hidden");
+        }
+
+        function resetForm() {
+            document.getElementById("old-meter-no").value = "";
+            document.getElementById("old-meter-val").value = "";
+            document.getElementById("new-meter-no").value = "";
+            document.getElementById("new-meter-val").value = "";
+            document.getElementById("camera-input").value = "";
+            document.getElementById("image-preview").classList.add("hidden");
+            document.getElementById("preview-watermark").classList.add("hidden");
+            document.getElementById("preview-placeholder").classList.remove("hidden");
+            document.getElementById("retake-btn").classList.add("hidden");
+            selectedImageDataUrl = null;
+            closeKeypad();
+        }
+
+        // สังเกตการณ์เครือข่ายอินเทอร์เน็ตจริงแบบ Realtime
+        window.addEventListener('online', function() {
+            document.getElementById("connection-status").className = "bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center";
+            document.getElementById("connection-status").innerHTML = `<span class="w-2 h-2 rounded-full bg-white mr-1.5 animate-ping"></span> ออนไลน์`;
+            updateOfflineCounter();
+        });
+
+        window.addEventListener('offline', function() {
+            document.getElementById("connection-status").className = "bg-rose-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center";
+            document.getElementById("connection-status").innerHTML = `<span class="w-2 h-2 rounded-full bg-white mr-1.5"></span> ออฟไลน์`;
+        });
+
+
+        // เริ่มรันระบบทั้งหมดเมื่อโหลดหน้าเว็บเสร็จสิ้น
+        window.onload = async function() {
+            // โหลด IndexedDB ออฟไลน์ก่อน
+            await initIndexedDB();
+            
+            // โหลดแผนที่พิกัดอินเทอร์แอกทีฟ
+            initMap();
+            
+            // สั่งดึงพิกัด GPS อัตโนมัติในครั้งแรก
+            getCurrentLocation();
+
+            // ตรวจเช็คสถานะเน็ตปัจจุบัน
+            if (!navigator.onLine) {
+                document.getElementById("connection-status").className = "bg-rose-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center";
+                document.getElementById("connection-status").innerHTML = `<span class="w-2 h-2 rounded-full bg-white mr-1.5"></span> ออฟไลน์`;
+            }
+        };
+    </script>
+</body>
+</html>
